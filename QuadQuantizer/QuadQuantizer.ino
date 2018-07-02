@@ -1,9 +1,14 @@
 #include <Wire.h>
 #include <SPI.h>
 #include "Adafruit_MCP23017.h"
+#include <MCPDAC.h>
+
 Adafruit_MCP23017 IO;
-int DAC_SS_1 = 9;
-int DAC_SS_2 = 10; 
+MCPDACClass dacOne;
+MCPDACClass dacTwo;
+
+int DAC_SS_1 = 10;
+int DAC_SS_2 = 9; 
 int isScale=0;
 
 int inOne;
@@ -27,29 +32,36 @@ int outputDiffThree=5000;
 int outputDiffFour=5000;
 
 int scaleMap[12]{0,0,0,0,0,0,0,0,0,0,0,0};
-
 int lookup[12][5];
 
-//buttonPin,LEDPIN (last four LEDS being on the expander chip)
-int button_led_bindings[12][2]{
-  {0,2},{1,3},{2,4},{3,5},{4,6},{5,7},{6,8},
-  {7,20},{8,12},{9,13},{10,14},{11,15} 
+//buttonPin,LEDPIN (last four LEDS being on the expander chip )
+int button_led_bindings[12]{
+  13,14,12,15,14,15,8,2,3,6,4,5  
 };
 
+//current,previous
 int button_vars[12][2]{
-  {0,0},{0,0},{0,0},{0,0},{0,0},{0,0},
-  {0,0},{0,0},{0,0},{0,0},{0,0},{0,0} 
+  {1,1},{1,1},{1,1},{1,1},{1,1},{1,1},
+  {1,1},{1,1},{1,1},{1,1},{1,1},{1,1} 
 };
 
 void setup() {
-
+  
   Serial.begin(9600);
-  IO.begin();
+  
   pinMode(DAC_SS_1, OUTPUT); 
   digitalWrite(DAC_SS_1, HIGH); 
   pinMode(DAC_SS_2, OUTPUT); 
-  digitalWrite(DAC_SS_2, HIGH); 
-  SPI.begin(); 
+  digitalWrite(DAC_SS_2, HIGH);
+   
+  dacOne.begin(DAC_SS_1);
+  dacTwo.begin(DAC_SS_2);
+  dacOne.setGain(CHANNEL_A,GAIN_HIGH);
+  dacOne.setGain(CHANNEL_B,GAIN_HIGH);
+  dacTwo.setGain(CHANNEL_A,GAIN_HIGH);
+  dacTwo.setGain(CHANNEL_B,GAIN_HIGH);
+  
+  IO.begin();
 
   setPinModes();
   populateLookup();
@@ -65,14 +77,16 @@ void setPinModes(){
   pinMode(6,OUTPUT);
   pinMode(7,OUTPUT);
   pinMode(8,OUTPUT);
-  pinMode(20,OUTPUT);
-  
+  pinMode(14,OUTPUT);
+  pinMode(15,OUTPUT);
+
   for (int i=0;i<16;i++){
     if (i<12){
       IO.pinMode(i,INPUT);
       IO.pullUp(i,HIGH);  
     } else{
-      IO.pinMode(i,OUTPUT);  
+      IO.pinMode(i,OUTPUT);
+      IO.digitalWrite(i,LOW);  
     } 
   }
 }
@@ -82,45 +96,41 @@ void populateLookup(){
   for(int i=0;i<5;i++){
     for(int j=0;j<12;j++){
        lookup[j][i]=pasteVal;
-       pasteVal+=68.266; 
+       pasteVal+=83.33;
     }  
   }
 }
 
+//update scale by toggling the momentary buttons
 int updateScale(){
   int on=0;
   for(int i=0;i<12;i++){
-    button_vars[i][0]=IO.digitalRead(button_led_bindings[i][0]);
-    if (button_vars[i][0]&&!button_vars[i][1]){
+    button_vars[i][0]=IO.digitalRead(i);
+    if (!button_vars[i][0]&&button_vars[i][1]){
       if (scaleMap[i]){
         scaleMap[i]=0;
       } else {
-        scaleMap[i]=1;
-        on=1;  
+        scaleMap[i]=1;  
+      }
+      if(button_led_bindings[i]<9||i==1||i==3){
+        digitalWrite(button_led_bindings[i],scaleMap[i]);
+      }else{
+        IO.digitalWrite(button_led_bindings[i],scaleMap[i]);
       }             
     }
+    if (scaleMap[i]){on=1;}
     button_vars[i][1]=button_vars[i][0];
   }
   return on;
 }
 
-void DACwrite(int cs_pin, byte dac, int value) {
-  byte low = value & 0xff; 
-  byte high = (value >> 8) & 0x0f; 
-  dac = (dac & 1) << 7; 
-  digitalWrite(cs_pin, LOW);
-  SPI.transfer(dac | 0x30 | high); 
-  SPI.transfer(low); 
-  digitalWrite(cs_pin, HIGH);
-}
-
 void loop() {
-
-  inOne = analogRead(A0)*4;
-  inTwo = analogRead(A1)*4;
-  inThree = analogRead(A2)*4;
-  inFour = analogRead(A3)*4;  
   
+  inOne = map(analogRead(A7),0,1023,0,4096);
+  inTwo = map(analogRead(A6),0,1023,0,4096);
+  inThree = map(analogRead(A2),0,1023,0,4096);
+  inFour = map(analogRead(A3),0,1023,0,4096); 
+
   currDiffOne=0;
   currDiffTwo=0;
   currDiffThree=0;
@@ -132,23 +142,29 @@ void loop() {
   outputDiffFour=5000;
 
   isScale=updateScale();
-   
+
+  //main quantization algorithm
   if(isScale){
+    
+    //iterate through scale 
     for(int j=0;j<12;j++){
-      
+
+      // if the note is on (i.e. is part of the selected scale)
       if (scaleMap[j]){
-        //turn on correct LEDS
-        if(j<8){
-          digitalWrite(button_led_bindings[j][1],HIGH);
-        }else{
-          IO.digitalWrite(button_led_bindings[j][1],HIGH);
-        }
+        
+        //iterate through possible quantization values 
+        //from the lookup table for each of the four channels
         
         for(int i=0;i<5;i++){
+          
           currDiffOne = abs(inOne-lookup[j][i]);
           currDiffTwo = abs(inTwo-lookup[j][i]);
           currDiffThree = abs(inThree-lookup[j][i]);
           currDiffFour = abs(inFour-lookup[j][i]);
+
+          //update each channel's output with the best target quantization 
+          //value so far (i.e. the output which has the minimum difference between
+          //the input to any of the possible outputs)
           
           if (currDiffOne<outputDiffOne){
             outputDiffOne=currDiffOne;
@@ -173,24 +189,20 @@ void loop() {
         }
       }
     }
+        
   } else {
-         
+    
+      //if no scale output 0V on DACs   
       outputOne=0;
       outputTwo=0;
       outputThree=0;
       outputFour=0; 
-      for(int j=0;j<12;j++){     
-        if(j<8){
-          digitalWrite(button_led_bindings[j][1],LOW);
-        }else{
-          IO.digitalWrite(button_led_bindings[j][1],LOW);
-        }
-      }      
+  
     }
-  
-  DACwrite(DAC_SS_1,0,outputOne);
-  DACwrite(DAC_SS_1,1,outputTwo);
-  DACwrite(DAC_SS_2,0,outputThree);
-  DACwrite(DAC_SS_2,1,outputFour);
-  
+
+  dacOne.setVoltage(CHANNEL_A,outputOne&0x0fff);
+  dacOne.setVoltage(CHANNEL_B,outputTwo&0x0fff);
+  dacTwo.setVoltage(CHANNEL_A,outputThree&0x0fff);
+  dacTwo.setVoltage(CHANNEL_B,outputFour&0x0fff);
+
 }
