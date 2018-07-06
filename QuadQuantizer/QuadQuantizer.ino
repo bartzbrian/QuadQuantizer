@@ -36,7 +36,7 @@ int lookup[12][5];
 
 //buttonPin,LEDPIN (last four LEDS being on the expander chip )
 int button_led_bindings[12]{
-  13,14,12,15,14,15,8,2,3,6,4,5  
+  13,7,12,15,14,15,8,2,3,6,4,5  
 };
 
 //current,previous
@@ -47,7 +47,7 @@ int button_vars[12][2]{
 
 void setup() {
   
-  Serial.begin(9600);
+//  Serial.begin(9600);
   
   pinMode(DAC_SS_1, OUTPUT); 
   digitalWrite(DAC_SS_1, HIGH); 
@@ -112,7 +112,7 @@ int updateScale(){
       } else {
         scaleMap[i]=1;  
       }
-      if(button_led_bindings[i]<9||i==1||i==3){
+      if(button_led_bindings[i]<9||i==3){
         digitalWrite(button_led_bindings[i],scaleMap[i]);
       }else{
         IO.digitalWrite(button_led_bindings[i],scaleMap[i]);
@@ -126,10 +126,18 @@ int updateScale(){
 
 void loop() {
   
-  inOne = map(analogRead(A7),0,1023,0,4096);
-  inTwo = map(analogRead(A6),0,1023,0,4096);
-  inThree = map(analogRead(A2),0,1023,0,4096);
-  inFour = map(analogRead(A3),0,1023,0,4096); 
+  inOne = map(analogRead(A2),0,1023,0,4096);
+  inTwo = map(analogRead(A3),0,1023,0,4096);
+  inThree = map(analogRead(A7),0,1023,0,4096);
+  inFour = map(analogRead(A6),0,1023,0,4096); 
+
+//  Serial.print(inOne);
+//  Serial.print(", ");
+//  Serial.print(inTwo);
+//  Serial.print(", ");
+//  Serial.print(inThree);
+//  Serial.print(", ");
+//  Serial.println(inFour);
 
   currDiffOne=0;
   currDiffTwo=0;
@@ -192,7 +200,7 @@ void loop() {
         
   } else {
     
-      //if no scale output 0V on DACs   
+      //if no scale, output 0V on DACs   
       outputOne=0;
       outputTwo=0;
       outputThree=0;
@@ -200,6 +208,7 @@ void loop() {
   
     }
 
+  //output voltages on DACS
   dacOne.setVoltage(CHANNEL_A,outputOne&0x0fff);
   dacOne.setVoltage(CHANNEL_B,outputTwo&0x0fff);
   dacTwo.setVoltage(CHANNEL_A,outputThree&0x0fff);
