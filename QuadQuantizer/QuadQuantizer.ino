@@ -7,6 +7,12 @@ Adafruit_MCP23017 IO;
 MCPDACClass dacOne;
 MCPDACClass dacTwo;
 
+int easterEgg=0;
+int tonesPerOctave;
+int flashOn=0;
+unsigned long currT;
+unsigned long prevT;
+
 int DAC_SS_1 = 10;
 int DAC_SS_2 = 9; 
 int isScale=0;
@@ -32,7 +38,7 @@ int outputDiffThree=5000;
 int outputDiffFour=5000;
 
 int scaleMap[12]{0,0,0,0,0,0,0,0,0,0,0,0};
-int lookup[12][5];
+int lookup[12][4];
 
 //buttonPin,LEDPIN (last four LEDS being on the expander chip )
 int button_led_bindings[12]{
@@ -64,8 +70,25 @@ void setup() {
   IO.begin();
 
   setPinModes();
-  populateLookup();
-  
+
+  //if C button held down on startup enter 7EDO mode
+  if (!IO.digitalRead(0)){
+    easterEgg=1;
+    populateLookupAlternate();
+    tonesPerOctave=7;
+    for(int i=0;i<20;i++){
+      digitalWrite(7,HIGH);
+      delay(50);
+      digitalWrite(7,LOW); 
+      delay(50); 
+    }
+  }else{
+    populateLookup();
+    tonesPerOctave=12;
+  }
+
+//  Serial.print("easter egg: ");
+//  Serial.print(easterEgg);
 }
 
 void setPinModes(){
@@ -93,14 +116,24 @@ void setPinModes(){
 
 void populateLookup(){
   int pasteVal=0;
-  for(int i=0;i<5;i++){
+  for(int i=0;i<4;i++){
     for(int j=0;j<12;j++){
        lookup[j][i]=pasteVal;
-       pasteVal+=83.33;
+       pasteVal+=85.33;
     }  
   }
 }
 
+//easterEgg mode 7edo scale
+void populateLookupAlternate(){
+  int pasteVal=0;
+  for(int i=0;i<4;i++){
+    for(int j=0;j<7;j++){
+       lookup[j][i]=pasteVal;
+       pasteVal+=146.29;
+    }  
+  }
+}
 //update scale by toggling the momentary buttons
 int updateScale(){
   int on=0;
@@ -121,6 +154,35 @@ int updateScale(){
     if (scaleMap[i]){on=1;}
     button_vars[i][1]=button_vars[i][0];
   }
+  return on;
+}
+
+//easterEgg
+int updateScaleAlt(){
+  int on=0;
+  int x=0;
+  for(int i=0;i<12;i++){
+    if(i==0||i==2||i==4||i==5||i==7||i==9||i==11){
+      button_vars[i][0]=IO.digitalRead(i);
+      if (!button_vars[i][0]&&button_vars[i][1]){
+        if (scaleMap[x]){
+          scaleMap[x]=0;
+        } else {
+          scaleMap[x]=1;  
+        }
+        if(button_led_bindings[i]<9||i==3){
+          digitalWrite(button_led_bindings[i],scaleMap[x]);
+        }else{
+          IO.digitalWrite(button_led_bindings[i],scaleMap[x]);
+        }             
+      }
+      if (scaleMap[x]){on=1;}
+      button_vars[i][1]=button_vars[i][0];
+      x+=1;
+    }
+//    Serial.print(scaleMap[i]);
+  }
+//  Serial.println();
   return on;
 }
 
@@ -149,13 +211,27 @@ void loop() {
   outputDiffThree=5000;
   outputDiffFour=5000;
 
-  isScale=updateScale();
-
+  if (easterEgg){
+    isScale=updateScaleAlt();
+    if ((currT-prevT)>500){
+      if(flashOn){
+        digitalWrite(7,LOW);
+        flashOn=0;  
+      } else {
+        digitalWrite(7,HIGH); 
+        flashOn=1; 
+      } 
+      prevT=currT;
+    }
+    currT=millis();
+  }else{
+    isScale=updateScale();
+  }
   //main quantization algorithm
   if(isScale){
     
     //iterate through scale 
-    for(int j=0;j<12;j++){
+    for(int j=0;j<tonesPerOctave;j++){
 
       // if the note is on (i.e. is part of the selected scale)
       if (scaleMap[j]){
@@ -163,7 +239,7 @@ void loop() {
         //iterate through possible quantization values 
         //from the lookup table for each of the four channels
         
-        for(int i=0;i<5;i++){
+        for(int i=0;i<4;i++){
           
           currDiffOne = abs(inOne-lookup[j][i]);
           currDiffTwo = abs(inTwo-lookup[j][i]);
@@ -206,12 +282,12 @@ void loop() {
       outputThree=0;
       outputFour=0; 
   
-    }
+  }
 
   //output voltages on DACS
   dacOne.setVoltage(CHANNEL_A,outputOne&0x0fff);
   dacOne.setVoltage(CHANNEL_B,outputTwo&0x0fff);
   dacTwo.setVoltage(CHANNEL_A,outputThree&0x0fff);
   dacTwo.setVoltage(CHANNEL_B,outputFour&0x0fff);
-
+  
 }
